@@ -5,3 +5,4 @@ groq
 sarvamai
 python-dotenv
 firebase-admin
+chromadb

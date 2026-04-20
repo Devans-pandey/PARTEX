@@ -30,5 +30,8 @@ Thumbs.db
 # Binary tools
 backend/ffmpeg.exe
 
+# RAG vector store (local)
+backend/chroma_db/
+
 # Misc
 frontend/(1).env

@@ -1,13 +1,23 @@
 """
 Patient history chatbot module.
-Uses Groq LLM to answer questions about a patient's medical history
-by aggregating data from all their problems and visits in Firebase.
+Uses RAG (Retrieval-Augmented Generation) with ChromaDB for semantic search
+over patient records, combined with Groq LLM for answering questions.
+
+Flow:
+  1. User asks a question about a patient.
+  2. RAG retrieves the most relevant transcript/record chunks from ChromaDB.
+  3. Retrieved chunks are passed as context to the Groq LLM.
+  4. LLM generates an answer grounded in the retrieved data.
+
+Fallback: If RAG returns no results (e.g. patient not indexed yet),
+falls back to full context-stuffing from Firebase data.
 """
 
 import os
 import json
 from groq import Groq
 from dotenv import load_dotenv
+from rag import retrieve_context
 
 load_dotenv()
 
@@ -20,14 +30,15 @@ If the data doesn't contain the answer, say so honestly.
 Do NOT make up medical information. Only report what is in the records.
 Format your responses in a readable way with bullet points when listing multiple items."""
 
-CHATBOT_PROMPT = """Based on the following patient medical history, answer the user's question.
+CHATBOT_PROMPT = """Based on the following patient medical records (retrieved via RAG), answer the user's question.
 
-PATIENT HISTORY:
+RETRIEVED MEDICAL RECORDS:
 {patient_history}
 
 USER QUESTION: {question}
 
-Answer based ONLY on the patient history data provided above. Be specific and reference dates/visits when possible."""
+Answer based ONLY on the retrieved medical records provided above. Be specific and reference dates/visits when possible.
+If the retrieved records are insufficient to fully answer the question, say so."""
 
 REALTIME_ASSIST_SYSTEM = """You are a consultation co-pilot for doctors in an Indian OPD.
 Your role is to provide safe, concise, and practical support during a live consultation.
@@ -170,18 +181,49 @@ def _build_patient_history_text(patient_data: dict) -> str:
     return header + "\n" + "\n".join(lines)
 
 
-def answer_patient_query(patient_data: dict, question: str) -> str:
+def answer_patient_query(patient_data: dict, question: str, patient_id: str = "") -> str:
     """
-    Answer a question about a patient's medical history using Groq LLM.
+    Answer a question about a patient's medical history using RAG + Groq LLM.
+
+    Strategy:
+      1. Try RAG retrieval from ChromaDB (semantic search).
+      2. If RAG returns relevant chunks, use those as context.
+      3. If RAG returns nothing, fall back to full history (context-stuffing).
 
     Args:
         patient_data: Full patient record from Firebase.
         question: User's question about the patient.
+        patient_id: Patient ID for RAG retrieval.
 
     Returns:
         String answer from the LLM.
     """
-    history_text = _build_patient_history_text(patient_data)
+    rag_mode = False
+    history_text = ""
+
+    # --- Step 1: Try RAG retrieval ---
+    if patient_id:
+        rag_chunks = retrieve_context(patient_id=patient_id, query=question, n_results=6)
+
+        if rag_chunks:
+            # Build context from retrieved chunks
+            chunk_texts = []
+            for i, chunk in enumerate(rag_chunks, 1):
+                label = chunk.get("problem_label", "")
+                chunk_type = chunk.get("chunk_type", "")
+                distance = chunk.get("distance", 0)
+                chunk_texts.append(
+                    f"[Chunk {i} | {chunk_type} | Problem: {label} | Relevance: {1 - distance:.2f}]\n"
+                    f"{chunk['text']}"
+                )
+            history_text = "\n\n".join(chunk_texts)
+            rag_mode = True
+            print(f"[chatbot] Using RAG context ({len(rag_chunks)} chunks) for query")
+
+    # --- Step 2: Fallback to full context-stuffing ---
+    if not rag_mode:
+        history_text = _build_patient_history_text(patient_data)
+        print(f"[chatbot] RAG returned no results, using full context fallback")
 
     prompt = CHATBOT_PROMPT.format(
         patient_history=history_text,
@@ -199,7 +241,10 @@ def answer_patient_query(patient_data: dict, question: str) -> str:
             max_tokens=600,
         )
 
-        return response.choices[0].message.content.strip()
+        answer = response.choices[0].message.content.strip()
+        mode_label = "RAG" if rag_mode else "full-context"
+        print(f"[chatbot] Answered via {mode_label}: '{question[:50]}...'")
+        return answer
 
     except Exception as exc:
         print(f"[chatbot] LLM call failed: {exc}")
