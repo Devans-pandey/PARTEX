@@ -143,7 +143,9 @@ def extract_endpoint():
 
     # Build visit record
     now = datetime.now(timezone.utc).isoformat()
-    visit_id = f"{chunk_id}_{now.replace(':', '-')}"
+    # Firebase paths cannot contain . $ # [ ] / or special chars
+    safe_ts = now.replace(":", "-").replace("+", "_").replace(".", "_")
+    visit_id = f"{chunk_id}_{safe_ts}"
 
     visit_record = {
         **extracted,

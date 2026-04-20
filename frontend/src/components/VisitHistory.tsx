@@ -29,18 +29,18 @@ export default function VisitHistory({ visits }: VisitHistoryProps) {
               <span className="visit-date">{formatDate(v.processed_at)}</span>
               <UrgencyBadge urgency={v.urgency} />
             </div>
-            {v.symptoms.length > 0 && (
+            {(v.symptoms || []).length > 0 && (
               <div className="pill-group">
-                {v.symptoms.map((s, i) => (
+                {(v.symptoms || []).map((s, i) => (
                   <span key={i} className="pill pill--symptom">
                     {s}
                   </span>
                 ))}
               </div>
             )}
-            {v.medications.length > 0 && (
+            {(v.medications || []).length > 0 && (
               <div className="pill-group" style={{ marginTop: 6 }}>
-                {v.medications.map((m, i) => (
+                {(v.medications || []).map((m, i) => (
                   <span key={i} className="pill pill--medication">
                     {m}
                   </span>

@@ -37,11 +37,11 @@ export default function PatientCard({ visit }: PatientCardProps) {
       </div>
 
       {/* Symptoms */}
-      {visit.symptoms.length > 0 && (
+      {(visit.symptoms || []).length > 0 && (
         <div className="field-group">
           <label className="field-label">Symptoms</label>
           <div className="pill-group">
-            {visit.symptoms.map((s, i) => (
+            {(visit.symptoms || []).map((s, i) => (
               <span key={i} className="pill pill--symptom">
                 {s}
               </span>
@@ -59,11 +59,11 @@ export default function PatientCard({ visit }: PatientCardProps) {
       )}
 
       {/* Medications */}
-      {visit.medications.length > 0 && (
+      {(visit.medications || []).length > 0 && (
         <div className="field-group">
           <label className="field-label">Medications</label>
           <div className="pill-group">
-            {visit.medications.map((m, i) => (
+            {(visit.medications || []).map((m, i) => (
               <span key={i} className="pill pill--medication">
                 {m}
               </span>
