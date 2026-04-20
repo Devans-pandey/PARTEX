@@ -10,9 +10,15 @@ export default function PatientCard({ visit }: PatientCardProps) {
   if (!visit) {
     return (
       <div className="card patient-card patient-card--empty" id="patient-card">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'rgba(255,255,255,0.1)', marginBottom: 16 }}>
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <line x1="19" y1="8" x2="19" y2="14" />
+          <line x1="22" y1="11" x2="16" y2="11" />
+        </svg>
         <p className="muted-text">
-          No data yet. Start recording a conversation to see extracted medical
-          information here.
+          No data yet. Start recording a doctor–patient conversation to see
+          extracted medical information here.
         </p>
       </div>
     );
