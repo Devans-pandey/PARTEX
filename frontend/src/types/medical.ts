@@ -15,6 +15,7 @@ export interface MedicalRecord {
   missing_critical_fields: string[];
   extraction_confidence: "high" | "medium" | "low";
   additional_notes: string | null;
+  problem_label?: string;
 }
 
 export interface VisitRecord extends MedicalRecord {
@@ -24,12 +25,20 @@ export interface VisitRecord extends MedicalRecord {
   raw_transcript: string;
   processed_at: string;
   extraction_status: "success" | "failed";
+  problem_id?: string;
+  turns?: ConversationTurn[];
 }
 
 export interface TranscribeResponse {
   transcript: string;
   language_detected: string;
   chunk_id: string;
+  speakers?: SpeakerSegment[];
+}
+
+export interface SpeakerSegment {
+  speaker: "doctor" | "patient";
+  text: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,4 +66,46 @@ export interface PatientSummary {
   last_visit_date: string | null;
   last_urgency: "low" | "medium" | "high" | null;
   visit_count: number;
+}
+
+// ---------------------------------------------------------------------------
+// Problem-based interfaces
+// ---------------------------------------------------------------------------
+
+export interface Problem {
+  problem_id: string;
+  label: string;
+  created_at: string;
+  status: "active" | "resolved";
+  visit_count: number;
+  last_visit_date: string;
+  last_urgency: "low" | "medium" | "high" | null;
+  last_symptoms: string[];
+  last_diagnosis: string | null;
+}
+
+export interface ProblemVisit {
+  visit_id: string;
+  raw_transcript: string;
+  turns: ConversationTurn[];
+  extracted: MedicalRecord;
+  processed_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Chatbot interfaces
+// ---------------------------------------------------------------------------
+
+export interface ChatbotMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  timestamp: string;
+}
+
+export interface RealtimeAssist {
+  medication_suggestions: string[];
+  counter_questions: string[];
+  rationale: string;
+  caution: string;
 }

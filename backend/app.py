@@ -1,8 +1,13 @@
 """
 Flask server for Healthcare Voice AI.
 Endpoints:
-  POST /transcribe  — accept audio blob, return transcript
-  POST /extract     — accept transcript, return structured medical JSON
+  POST /transcribe         — accept audio blob, return transcript
+  POST /extract            — accept transcript, return structured medical JSON (problem-based)
+  GET  /patients/<id>/problems         — list all problems for a patient
+  GET  /patients/<id>/problems/<pid>/transcript — get saved transcript for a problem
+  POST /chatbot            — answer questions about patient history
+  POST /migrate            — migrate old visits/ schema to problems/ schema
+  GET  /health             — health check
 """
 
 import os
@@ -39,7 +44,8 @@ else:
 # Lazy-load heavy modules so startup logs are clear
 # ---------------------------------------------------------------------------
 from transcribe import transcribe_audio          # noqa: E402
-from extract import extract_medical_data          # noqa: E402
+from extract import extract_medical_data, detect_speakers  # noqa: E402
+from chatbot import answer_patient_query, generate_realtime_assist  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Flask app
@@ -70,29 +76,48 @@ def _convert_to_wav(input_path: str, output_path: str) -> bool:
         return False
 
 
-def _write_to_firebase(patient_id: str, visit_id: str, data: dict) -> None:
-    """Write visit data to Firebase Realtime Database."""
-    if not FIREBASE_ENABLED:
-        print("[app] Firebase disabled — skipping write.")
-        return
-    ref = firebase_db.reference(f"patients/{patient_id}/visits/{visit_id}")
-    ref.set(data)
-    print(f"[app] Wrote visit {visit_id} for patient {patient_id} to Firebase.")
-
-
-def _get_prior_patient_data(patient_id: str) -> dict | None:
-    """Fetch merged patient profile from all prior visits in Firebase."""
+def _get_patient_data(patient_id: str) -> dict | None:
+    """Fetch full patient record from Firebase."""
     if not FIREBASE_ENABLED:
         return None
     try:
-        ref = firebase_db.reference(f"patients/{patient_id}/visits")
-        visits = ref.get()
-        if not visits:
+        ref = firebase_db.reference(f"patients/{patient_id}")
+        return ref.get()
+    except Exception as exc:
+        print(f"[app] Failed to fetch patient data: {exc}")
+        return None
+
+
+def _get_prior_patient_data(patient_id: str) -> dict | None:
+    """Fetch merged patient profile from all prior visits/problems in Firebase."""
+    if not FIREBASE_ENABLED:
+        return None
+    try:
+        patient_data = _get_patient_data(patient_id)
+        if not patient_data:
             return None
 
-        # Sort visits by processed_at (most recent first)
-        visit_list = sorted(
-            visits.values(),
+        # Collect all extracted data from problems (new schema)
+        all_extracted = []
+        problems = patient_data.get("problems", {})
+        for prob_data in problems.values():
+            for visit in (prob_data.get("visits", {}) or {}).values():
+                ext = visit.get("extracted", {})
+                if ext:
+                    ext["processed_at"] = visit.get("processed_at", "")
+                    all_extracted.append(ext)
+
+        # Also collect from legacy visits (old schema)
+        legacy_visits = patient_data.get("visits", {})
+        if legacy_visits:
+            for v in legacy_visits.values():
+                all_extracted.append(v)
+
+        if not all_extracted:
+            return None
+
+        # Sort by processed_at (most recent first)
+        all_extracted.sort(
             key=lambda v: v.get("processed_at", ""),
             reverse=True,
         )
@@ -103,7 +128,7 @@ def _get_prior_patient_data(patient_id: str) -> dict | None:
         list_fields = ["symptoms", "medications"]
 
         for field in merge_fields:
-            for v in visit_list:
+            for v in all_extracted:
                 val = v.get(field)
                 if val is not None and val != "":
                     merged[field] = val
@@ -112,7 +137,7 @@ def _get_prior_patient_data(patient_id: str) -> dict | None:
         # For list fields: combine unique values across all visits
         for field in list_fields:
             combined = []
-            for v in visit_list:
+            for v in all_extracted:
                 for item in v.get(field, []):
                     if item and item not in combined:
                         combined.append(item)
@@ -164,10 +189,16 @@ def transcribe_endpoint():
         if os.path.exists(p):
             os.unlink(p)
 
+    # Auto-detect speakers from the raw transcript
+    speakers = []
+    if result["transcript"].strip():
+        speakers = detect_speakers(result["transcript"])
+
     return jsonify({
         "transcript": result["transcript"],
         "language_detected": result["language_detected"],
         "chunk_id": chunk_id,
+        "speakers": speakers,
     })
 
 
@@ -175,13 +206,15 @@ def transcribe_endpoint():
 def extract_endpoint():
     """
     POST /extract
-    Receives JSON: { transcript, patient_id, chunk_id }
-    Returns:  structured medical JSON + writes to Firebase
+    Receives JSON: { transcript, patient_id, problem_id?, chunk_id, turns? }
+    Returns:  structured medical JSON + writes to Firebase under problems/
     """
     body = request.get_json(force=True)
     transcript = body.get("transcript", "")
     patient_id = body.get("patient_id", "UNKNOWN")
+    problem_id = body.get("problem_id", "")  # if empty, create new problem
     chunk_id = body.get("chunk_id", str(uuid.uuid4())[:8])
+    turns = body.get("turns", [])  # conversation turns array
 
     if not transcript:
         return jsonify({"error": "Empty transcript"}), 400
@@ -194,24 +227,317 @@ def extract_endpoint():
 
     # Build visit record
     now = datetime.now(timezone.utc).isoformat()
-    # Firebase paths cannot contain . $ # [ ] / or special chars
     safe_ts = now.replace(":", "-").replace("+", "_").replace(".", "_")
     visit_id = f"{chunk_id}_{safe_ts}"
 
+    # If no problem_id provided, create a new one
+    if not problem_id:
+        problem_id = f"prob_{str(uuid.uuid4())[:8]}"
+
+    problem_label = extracted.get("problem_label", "General Consultation")
+
     visit_record = {
-        **extracted,
-        "patient_id": patient_id,
         "visit_id": visit_id,
         "chunk_id": chunk_id,
         "raw_transcript": transcript,
+        "turns": turns,
+        "extracted": extracted,
         "processed_at": now,
         "extraction_status": extracted.get("extraction_status", "success"),
     }
 
-    # Write to Firebase
-    _write_to_firebase(patient_id, visit_id, visit_record)
+    # Write to Firebase under new schema: patients/{id}/problems/{problem_id}/
+    if FIREBASE_ENABLED:
+        try:
+            # Write/update problem metadata
+            prob_ref = firebase_db.reference(f"patients/{patient_id}/problems/{problem_id}")
+            prob_meta = prob_ref.get() or {}
 
-    return jsonify(visit_record)
+            if not prob_meta.get("created_at"):
+                # New problem
+                prob_ref.update({
+                    "label": problem_label,
+                    "created_at": now,
+                    "status": "active",
+                })
+            else:
+                # Update label if we got a better one
+                if problem_label != "General Consultation":
+                    prob_ref.update({"label": problem_label})
+
+            # Write visit under problem
+            visit_ref = firebase_db.reference(
+                f"patients/{patient_id}/problems/{problem_id}/visits/{visit_id}"
+            )
+            visit_ref.set(visit_record)
+            print(f"[app] Wrote visit {visit_id} for patient {patient_id}, problem {problem_id}")
+
+        except Exception as exc:
+            print(f"[app] Firebase write failed: {exc}")
+
+    # Return full response
+    return jsonify({
+        **extracted,
+        "patient_id": patient_id,
+        "problem_id": problem_id,
+        "problem_label": problem_label,
+        "visit_id": visit_id,
+        "chunk_id": chunk_id,
+        "raw_transcript": transcript,
+        "turns": turns,
+        "processed_at": now,
+        "extraction_status": extracted.get("extraction_status", "success"),
+    })
+
+
+@app.route("/patients/<patient_id>/problems", methods=["GET"])
+def get_patient_problems(patient_id: str):
+    """
+    GET /patients/<patient_id>/problems
+    Returns list of problems for a patient with visit counts.
+    """
+    if not FIREBASE_ENABLED:
+        return jsonify({"problems": []}), 200
+
+    try:
+        ref = firebase_db.reference(f"patients/{patient_id}/problems")
+        problems_data = ref.get()
+
+        if not problems_data:
+            return jsonify({"problems": []}), 200
+
+        problems = []
+        for prob_id, prob_data in problems_data.items():
+            visits = prob_data.get("visits", {}) or {}
+            visit_count = len(visits)
+
+            # Get latest visit info
+            latest_visit = None
+            if visits:
+                visit_list = sorted(
+                    visits.values(),
+                    key=lambda v: v.get("processed_at", ""),
+                    reverse=True,
+                )
+                latest_visit = visit_list[0]
+
+            latest_extracted = {}
+            if latest_visit:
+                latest_extracted = latest_visit.get("extracted", {})
+
+            problems.append({
+                "problem_id": prob_id,
+                "label": prob_data.get("label", "Unknown"),
+                "created_at": prob_data.get("created_at", ""),
+                "status": prob_data.get("status", "active"),
+                "visit_count": visit_count,
+                "last_visit_date": latest_visit.get("processed_at", "") if latest_visit else "",
+                "last_urgency": latest_extracted.get("urgency", None),
+                "last_symptoms": latest_extracted.get("symptoms", []),
+                "last_diagnosis": latest_extracted.get("diagnosis", None),
+            })
+
+        # Sort by last visit date (most recent first)
+        problems.sort(
+            key=lambda p: p.get("last_visit_date", ""),
+            reverse=True,
+        )
+
+        return jsonify({"problems": problems}), 200
+
+    except Exception as exc:
+        print(f"[app] Failed to fetch problems: {exc}")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/patients/<patient_id>/problems/<problem_id>/transcript", methods=["GET"])
+def get_problem_transcript(patient_id: str, problem_id: str):
+    """
+    GET /patients/<patient_id>/problems/<problem_id>/transcript
+    Returns all visits and transcripts for a specific problem.
+    """
+    if not FIREBASE_ENABLED:
+        return jsonify({"visits": []}), 200
+
+    try:
+        ref = firebase_db.reference(
+            f"patients/{patient_id}/problems/{problem_id}/visits"
+        )
+        visits_data = ref.get()
+
+        if not visits_data:
+            return jsonify({"visits": []}), 200
+
+        visits = []
+        for visit_id, visit in visits_data.items():
+            visits.append({
+                "visit_id": visit_id,
+                "raw_transcript": visit.get("raw_transcript", ""),
+                "turns": visit.get("turns", []),
+                "extracted": visit.get("extracted", {}),
+                "processed_at": visit.get("processed_at", ""),
+            })
+
+        # Sort newest first
+        visits.sort(
+            key=lambda v: v.get("processed_at", ""),
+            reverse=True,
+        )
+
+        return jsonify({"visits": visits}), 200
+
+    except Exception as exc:
+        print(f"[app] Failed to fetch transcript: {exc}")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/chatbot", methods=["POST"])
+def chatbot_endpoint():
+    """
+    POST /chatbot
+    Receives JSON: { patient_id, question }
+    Returns: { answer }
+    """
+    body = request.get_json(force=True)
+    patient_id = body.get("patient_id", "")
+    question = body.get("question", "")
+
+    if not patient_id:
+        return jsonify({"error": "patient_id is required"}), 400
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+
+    # Fetch full patient data from Firebase
+    patient_data = _get_patient_data(patient_id)
+
+    if not patient_data:
+        return jsonify({
+            "answer": "No medical records found for this patient. Please record a consultation first."
+        }), 200
+
+    # Get AI answer
+    answer = answer_patient_query(patient_data, question)
+
+    return jsonify({"answer": answer}), 200
+
+
+@app.route("/assist", methods=["POST"])
+def assist_endpoint():
+    """
+    POST /assist
+    Receives JSON: { patient_id, turns, problem_id?, problem_label? }
+    Returns: { medication_suggestions, counter_questions, rationale, caution }
+    """
+    body = request.get_json(force=True)
+    patient_id = body.get("patient_id", "")
+    turns = body.get("turns", [])
+    problem_label = body.get("problem_label", "")
+
+    if not patient_id:
+        return jsonify({"error": "patient_id is required"}), 400
+    if not isinstance(turns, list):
+        return jsonify({"error": "turns must be an array"}), 400
+
+    patient_data = _get_patient_data(patient_id)
+    assist = generate_realtime_assist(
+        patient_data=patient_data,
+        turns=turns,
+        problem_label=problem_label,
+    )
+    return jsonify(assist), 200
+
+
+@app.route("/migrate", methods=["POST"])
+def migrate_endpoint():
+    """
+    POST /migrate
+    One-time migration: move old patients/{id}/visits/ to patients/{id}/problems/default/visits/
+    """
+    if not FIREBASE_ENABLED:
+        return jsonify({"error": "Firebase not enabled"}), 500
+
+    try:
+        patients_ref = firebase_db.reference("patients")
+        all_patients = patients_ref.get()
+
+        if not all_patients:
+            return jsonify({"message": "No patients to migrate"}), 200
+
+        migrated = 0
+        for patient_id, patient_data in all_patients.items():
+            old_visits = patient_data.get("visits", {})
+            has_problems = bool(patient_data.get("problems"))
+
+            if old_visits and not has_problems:
+                # Create a default problem from the old visits
+                now = datetime.now(timezone.utc).isoformat()
+
+                # Try to determine a label from the most recent visit
+                visit_list = sorted(
+                    old_visits.values(),
+                    key=lambda v: v.get("processed_at", ""),
+                    reverse=True,
+                )
+                label = "General Consultation"
+                for v in visit_list:
+                    if v.get("diagnosis"):
+                        label = v["diagnosis"][:30]
+                        break
+                    if v.get("symptoms") and len(v["symptoms"]) > 0:
+                        label = v["symptoms"][0].title()
+                        break
+
+                default_problem_id = "prob_migrated"
+
+                # Write problem metadata
+                prob_ref = firebase_db.reference(
+                    f"patients/{patient_id}/problems/{default_problem_id}"
+                )
+                prob_ref.set({
+                    "label": label,
+                    "created_at": visit_list[-1].get("processed_at", now) if visit_list else now,
+                    "status": "active",
+                })
+
+                # Move each visit under the problem (convert to new format)
+                for visit_id, visit_data in old_visits.items():
+                    new_visit = {
+                        "visit_id": visit_id,
+                        "chunk_id": visit_data.get("chunk_id", ""),
+                        "raw_transcript": visit_data.get("raw_transcript", ""),
+                        "turns": [],
+                        "extracted": {
+                            "patient_name": visit_data.get("patient_name"),
+                            "age": visit_data.get("age"),
+                            "gender": visit_data.get("gender"),
+                            "symptoms": visit_data.get("symptoms", []),
+                            "duration": visit_data.get("duration"),
+                            "diagnosis": visit_data.get("diagnosis"),
+                            "medications": visit_data.get("medications", []),
+                            "urgency": visit_data.get("urgency", "low"),
+                            "extraction_confidence": visit_data.get("extraction_confidence", "medium"),
+                            "additional_notes": visit_data.get("additional_notes"),
+                            "problem_label": label,
+                        },
+                        "processed_at": visit_data.get("processed_at", now),
+                        "extraction_status": visit_data.get("extraction_status", "success"),
+                    }
+                    visit_ref = firebase_db.reference(
+                        f"patients/{patient_id}/problems/{default_problem_id}/visits/{visit_id}"
+                    )
+                    visit_ref.set(new_visit)
+
+                migrated += 1
+                print(f"[app] Migrated patient {patient_id} ({len(old_visits)} visits -> problem '{label}')")
+
+        return jsonify({
+            "message": f"Migration complete. {migrated} patient(s) migrated.",
+            "migrated_count": migrated,
+        }), 200
+
+    except Exception as exc:
+        print(f"[app] Migration failed: {exc}")
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/health", methods=["GET"])

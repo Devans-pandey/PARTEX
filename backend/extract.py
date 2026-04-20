@@ -1,6 +1,11 @@
 """
 Groq LLM extraction module.
 Calls llama-3.3-70b-versatile to extract structured medical data from transcripts.
+
+Features:
+  - Extract structured medical JSON from doctor-patient conversations
+  - Auto-detect speaker (doctor vs patient) from a single-mic transcript
+  - Auto-generate a short problem label (e.g. "Fever", "Fracture")
 """
 
 import os
@@ -24,6 +29,7 @@ RULES:
 - For urgency: "high" = chest pain, breathing difficulty, loss of consciousness, severe bleeding. "medium" = fever >3 days, persistent vomiting, moderate pain. "low" = everything else.
 - Paracetamol and Pantoprazole are different medications. Identify drug names carefully.
 - "wahan dard hai" or "wo wali tablet" are ambiguous — return null for those fields.
+- "problem_label" should be a short 1-3 word label summarizing the chief complaint (e.g. "Fever", "Chest Pain", "Fracture", "Skin Rash"). If unclear, use "General Consultation".
 
 OUTPUT SCHEMA (return exactly these fields):
 {{
@@ -38,22 +44,23 @@ OUTPUT SCHEMA (return exactly these fields):
   "urgency": "low" | "medium" | "high",
   "missing_critical_fields": array of field names that are null but medically important,
   "extraction_confidence": "high" | "medium" | "low",
-  "additional_notes": string or null
+  "additional_notes": string or null,
+  "problem_label": string (short 1-3 word chief complaint label)
 }}
 
 FEW-SHOT EXAMPLES:
 
 Example 1:
 Transcript: "Ramu ko teen din se bukhar hai, 102 degree. Sar bhi dard kar raha hai. Koi dawai nahi li."
-Output: {{"patient_name":"Ramu","age":null,"gender":null,"symptoms":["fever","headache"],"duration":"3 days","diagnosis":null,"medications":[],"language_detected":"hinglish","urgency":"medium","missing_critical_fields":["age","diagnosis"],"extraction_confidence":"high","additional_notes":"Temperature 102°F. No medication taken."}}
+Output: {{"patient_name":"Ramu","age":null,"gender":null,"symptoms":["fever","headache"],"duration":"3 days","diagnosis":null,"medications":[],"language_detected":"hinglish","urgency":"medium","missing_critical_fields":["age","diagnosis"],"extraction_confidence":"high","additional_notes":"Temperature 102°F. No medication taken.","problem_label":"Fever"}}
 
 Example 2:
 Transcript: "Mujhe continuous fever hai aani doka dukhat aahe.Teen divas zaale."
-Output: {{"patient_name":null,"age":null,"gender":null,"symptoms":["fever","headache"],"duration":"3 days","diagnosis":null,"medications":[],"language_detected":"mixed","urgency":"medium","missing_critical_fields":["patient_name","age","diagnosis"],"extraction_confidence":"high","additional_notes":"Code-switching: Hindi + Marathi detected."}}
+Output: {{"patient_name":null,"age":null,"gender":null,"symptoms":["fever","headache"],"duration":"3 days","diagnosis":null,"medications":[],"language_detected":"mixed","urgency":"medium","missing_critical_fields":["patient_name","age","diagnosis"],"extraction_confidence":"high","additional_notes":"Code-switching: Hindi + Marathi detected.","problem_label":"Fever"}}
 
 Example 3:
 Transcript: "45 year old female patient. Chest pain since morning, shortness of breath. Takes aspirin daily."
-Output: {{"patient_name":null,"age":45,"gender":"female","symptoms":["chest pain","shortness of breath"],"duration":"since morning","diagnosis":null,"medications":["aspirin"],"language_detected":"en","urgency":"high","missing_critical_fields":["patient_name","diagnosis"],"extraction_confidence":"high","additional_notes":null}}
+Output: {{"patient_name":null,"age":45,"gender":"female","symptoms":["chest pain","shortness of breath"],"duration":"since morning","diagnosis":null,"medications":["aspirin"],"language_detected":"en","urgency":"high","missing_critical_fields":["patient_name","diagnosis"],"extraction_confidence":"high","additional_notes":null,"problem_label":"Chest Pain"}}
 
 PREVIOUSLY KNOWN PATIENT DATA (from prior visits — use this to fill gaps, do NOT override with null if already known):
 {prior_context}
@@ -62,7 +69,31 @@ NOW EXTRACT FROM THIS TRANSCRIPT:
 {transcript}"""
 
 
-def _parse_json_response(text: str) -> dict | None:
+# ---------------------------------------------------------------------------
+# Speaker detection prompt
+# ---------------------------------------------------------------------------
+SPEAKER_DETECTION_SYSTEM = "You are a medical conversation analyst. You label each line of a doctor-patient transcript with the speaker role."
+
+SPEAKER_DETECTION_PROMPT = """Analyze this transcript from a doctor-patient consultation recorded with a single microphone. Label each sentence/line with who is speaking: DOCTOR or PATIENT.
+
+RULES:
+- Doctors typically: ask diagnostic questions, give instructions, prescribe medications, use medical terminology
+- Patients typically: describe symptoms, answer questions, express concerns, mention pain/discomfort
+- The conversation usually alternates between doctor and patient
+- In Indian hospital OPDs, doctors often speak more formally and patients more casually
+- Return ONLY a valid JSON array of objects. No markdown, no explanation.
+
+OUTPUT FORMAT:
+[
+  {{"speaker": "doctor" | "patient", "text": "the line of speech"}},
+  ...
+]
+
+TRANSCRIPT:
+{transcript}"""
+
+
+def _parse_json_response(text: str) -> dict | list | None:
     """Attempt to parse JSON from LLM response, stripping markdown fences if present."""
     # Try direct parse first
     try:
@@ -123,7 +154,10 @@ def extract_medical_data(transcript: str, prior_patient_data: dict | None = None
     raw_text = response.choices[0].message.content.strip()
     parsed = _parse_json_response(raw_text)
 
-    if parsed is not None:
+    if parsed is not None and isinstance(parsed, dict):
+        # Ensure problem_label has a default
+        if not parsed.get("problem_label"):
+            parsed["problem_label"] = "General Consultation"
         return parsed
 
     # Retry with stricter instruction
@@ -147,11 +181,62 @@ def extract_medical_data(transcript: str, prior_patient_data: dict | None = None
     raw_text_retry = response.choices[0].message.content.strip()
     parsed = _parse_json_response(raw_text_retry)
 
-    if parsed is not None:
+    if parsed is not None and isinstance(parsed, dict):
+        if not parsed.get("problem_label"):
+            parsed["problem_label"] = "General Consultation"
         return parsed
 
     # Both attempts failed
     return {
         "extraction_status": "failed",
         "raw_transcript": transcript,
+        "problem_label": "General Consultation",
     }
+
+
+def detect_speakers(transcript: str) -> list[dict]:
+    """
+    Given a raw transcript from a single microphone, use the LLM to label
+    each sentence/line as DOCTOR or PATIENT.
+
+    Args:
+        transcript: Raw text from transcription (no speaker labels).
+
+    Returns:
+        List of dicts with 'speaker' and 'text' keys.
+        Falls back to a single entry if detection fails.
+    """
+    prompt = SPEAKER_DETECTION_PROMPT.format(transcript=transcript)
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": SPEAKER_DETECTION_SYSTEM},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0,
+            max_tokens=1000,
+        )
+
+        raw_text = response.choices[0].message.content.strip()
+        parsed = _parse_json_response(raw_text)
+
+        if parsed is not None and isinstance(parsed, list):
+            # Normalize speaker names
+            result = []
+            for item in parsed:
+                speaker = item.get("speaker", "patient").lower()
+                if speaker not in ("doctor", "patient"):
+                    speaker = "patient"
+                result.append({
+                    "speaker": speaker,
+                    "text": item.get("text", ""),
+                })
+            return result
+
+    except Exception as exc:
+        print(f"[extract] Speaker detection failed: {exc}")
+
+    # Fallback: return as single patient utterance
+    return [{"speaker": "patient", "text": transcript}]
