@@ -33,7 +33,20 @@ export default function App() {
     setStatusMessage(null);
   }, []);
 
-  const handleExtracted = useCallback((_data: VisitRecord) => {
+  const handleExtracted = useCallback((data: VisitRecord) => {
+    // Store extracted data locally so PatientCard shows it immediately,
+    // even if Firebase is not configured or slow to sync.
+    setVisits((prev) => {
+      const exists = prev.some((v) => v.visit_id === data.visit_id);
+      if (exists) return prev;
+      const updated = [data, ...prev];
+      updated.sort(
+        (a, b) =>
+          new Date(b.processed_at).getTime() -
+          new Date(a.processed_at).getTime()
+      );
+      return updated;
+    });
     setStatusMessage("Data extracted and saved ✓");
     setTimeout(() => setStatusMessage(null), 3000);
   }, []);

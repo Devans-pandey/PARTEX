@@ -26,3 +26,9 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Binary tools
+backend/ffmpeg.exe
+
+# Misc
+frontend/(1).env
