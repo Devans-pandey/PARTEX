@@ -2,5 +2,6 @@ flask
 flask-cors
 openai-whisper
 groq
+sarvamai
 python-dotenv
 firebase-admin
