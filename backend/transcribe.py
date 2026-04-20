@@ -52,6 +52,45 @@ print(f"[transcribe] Language detection restricted to: {list(ALLOWED_LANGUAGES.v
 
 
 # ---------------------------------------------------------------------------
+# Garbage transcript detection
+# ---------------------------------------------------------------------------
+def _is_garbage_transcript(text: str) -> bool:
+    """
+    Heuristic check: returns True if the transcript looks like garbage.
+    Common Sarvam failure modes: repeated characters, single nonsense word,
+    excessive punctuation, or very short meaningless output.
+    """
+    if not text or len(text.strip()) < 2:
+        return True
+
+    stripped = text.strip()
+
+    # Check for excessive character repetition (e.g., "aaaaaaa", "shshshshsh")
+    if len(stripped) >= 4:
+        unique_chars = set(stripped.replace(" ", "").lower())
+        ratio = len(unique_chars) / len(stripped.replace(" ", ""))
+        if ratio < 0.15:  # Less than 15% unique chars = gibberish
+            print(f"[transcribe] GARBAGE detected: low char diversity ({ratio:.2f})")
+            return True
+
+    # Check for repeated short patterns (e.g., "na na na na", "ha ha ha")
+    words = stripped.split()
+    if len(words) >= 3:
+        unique_words = set(w.lower() for w in words)
+        word_ratio = len(unique_words) / len(words)
+        if word_ratio < 0.2 and len(unique_words) <= 2:
+            print(f"[transcribe] GARBAGE detected: repeated words ({unique_words})")
+            return True
+
+    # Single very short word that isn't a real word
+    if len(words) == 1 and len(words[0]) <= 3:
+        print(f"[transcribe] GARBAGE detected: single short word '{words[0]}'")
+        return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Sarvam transcription (primary)
 # ---------------------------------------------------------------------------
 def _transcribe_with_sarvam(audio_path: str) -> dict | None:
@@ -96,6 +135,13 @@ def _transcribe_with_sarvam(audio_path: str) -> dict | None:
             language_code = "hi"
 
         if transcript:
+            print(f"[transcribe] Sarvam raw output: '{transcript[:120]}...'")
+
+            # Check for garbage output
+            if _is_garbage_transcript(transcript):
+                print(f"[transcribe] Sarvam returned GARBAGE transcript, falling back to Groq.")
+                return None
+
             print(f"[transcribe] Sarvam SUCCESS | lang={language_code}")
             return {
                 "transcript": transcript,
