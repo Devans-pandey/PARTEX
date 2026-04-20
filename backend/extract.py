@@ -55,6 +55,9 @@ Example 3:
 Transcript: "45 year old female patient. Chest pain since morning, shortness of breath. Takes aspirin daily."
 Output: {{"patient_name":null,"age":45,"gender":"female","symptoms":["chest pain","shortness of breath"],"duration":"since morning","diagnosis":null,"medications":["aspirin"],"language_detected":"en","urgency":"high","missing_critical_fields":["patient_name","diagnosis"],"extraction_confidence":"high","additional_notes":null}}
 
+PREVIOUSLY KNOWN PATIENT DATA (from prior visits — use this to fill gaps, do NOT override with null if already known):
+{prior_context}
+
 NOW EXTRACT FROM THIS TRANSCRIPT:
 {transcript}"""
 
@@ -76,17 +79,35 @@ def _parse_json_response(text: str) -> dict | None:
         return None
 
 
-def extract_medical_data(transcript: str) -> dict:
+def extract_medical_data(transcript: str, prior_patient_data: dict | None = None) -> dict:
     """
     Extract structured medical data from a transcript using Groq LLM.
 
+    If prior_patient_data is provided (from previous visits), the LLM will
+    use it to fill gaps and preserve already-known fields.
+
     Args:
         transcript: Raw conversation text.
+        prior_patient_data: Optional dict with previously known fields.
 
     Returns:
         dict with all extracted medical fields, or a failure envelope.
     """
-    user_prompt = USER_PROMPT_TEMPLATE.format(transcript=transcript)
+    # Build prior context string
+    prior_context = "None (new patient)"
+    if prior_patient_data:
+        known_fields = []
+        for key in ["patient_name", "age", "gender", "symptoms", "medications", "diagnosis", "duration"]:
+            val = prior_patient_data.get(key)
+            if val is not None and val != [] and val != "":
+                known_fields.append(f"  {key}: {val}")
+        if known_fields:
+            prior_context = "\n".join(known_fields)
+
+    user_prompt = USER_PROMPT_TEMPLATE.format(
+        transcript=transcript,
+        prior_context=prior_context,
+    )
 
     # First attempt
     response = client.chat.completions.create(

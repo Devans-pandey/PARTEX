@@ -80,6 +80,54 @@ def _write_to_firebase(patient_id: str, visit_id: str, data: dict) -> None:
     print(f"[app] Wrote visit {visit_id} for patient {patient_id} to Firebase.")
 
 
+def _get_prior_patient_data(patient_id: str) -> dict | None:
+    """Fetch merged patient profile from all prior visits in Firebase."""
+    if not FIREBASE_ENABLED:
+        return None
+    try:
+        ref = firebase_db.reference(f"patients/{patient_id}/visits")
+        visits = ref.get()
+        if not visits:
+            return None
+
+        # Sort visits by processed_at (most recent first)
+        visit_list = sorted(
+            visits.values(),
+            key=lambda v: v.get("processed_at", ""),
+            reverse=True,
+        )
+
+        # Merge: take the most recent non-null value for each field
+        merged: dict = {}
+        merge_fields = ["patient_name", "age", "gender", "diagnosis", "duration"]
+        list_fields = ["symptoms", "medications"]
+
+        for field in merge_fields:
+            for v in visit_list:
+                val = v.get(field)
+                if val is not None and val != "":
+                    merged[field] = val
+                    break
+
+        # For list fields: combine unique values across all visits
+        for field in list_fields:
+            combined = []
+            for v in visit_list:
+                for item in v.get(field, []):
+                    if item and item not in combined:
+                        combined.append(item)
+            if combined:
+                merged[field] = combined
+
+        if merged:
+            print(f"[app] Prior patient data for {patient_id}: {list(merged.keys())}")
+            return merged
+        return None
+    except Exception as exc:
+        print(f"[app] Failed to fetch prior data: {exc}")
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -138,8 +186,11 @@ def extract_endpoint():
     if not transcript:
         return jsonify({"error": "Empty transcript"}), 400
 
-    # Extract structured data via Groq LLM
-    extracted = extract_medical_data(transcript)
+    # Fetch prior patient data for returning patients
+    prior_data = _get_prior_patient_data(patient_id)
+
+    # Extract structured data via Groq LLM (with prior context if available)
+    extracted = extract_medical_data(transcript, prior_patient_data=prior_data)
 
     # Build visit record
     now = datetime.now(timezone.utc).isoformat()

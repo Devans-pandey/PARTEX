@@ -31,3 +31,30 @@ export interface TranscribeResponse {
   language_detected: string;
   chunk_id: string;
 }
+
+// ---------------------------------------------------------------------------
+// New interfaces for patient management & consultation flow
+// ---------------------------------------------------------------------------
+
+export interface ConversationTurn {
+  id: string;
+  speaker: "patient" | "doctor";
+  transcript: string;
+  timestamp: string; // ISO string
+}
+
+export interface ConsultationSession {
+  session_id: string;
+  patient_id: string;
+  turns: ConversationTurn[];
+  status: "active" | "extracting" | "complete";
+  started_at: string; // ISO string
+}
+
+export interface PatientSummary {
+  patient_id: string;
+  patient_name: string | null;
+  last_visit_date: string | null;
+  last_urgency: "low" | "medium" | "high" | null;
+  visit_count: number;
+}
