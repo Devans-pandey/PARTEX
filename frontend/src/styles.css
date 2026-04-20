@@ -1,0 +1,442 @@
+/* ===================================================================
+   Healthcare Voice AI — Styles
+   Plain CSS, no frameworks. Premium medical UI aesthetic.
+   =================================================================== */
+
+/* ---- Reset & base ---- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: #F9F9F8;
+  color: #1a1a1a;
+  line-height: 1.55;
+  min-height: 100vh;
+}
+
+/* ---- Layout container ---- */
+.app-container {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 16px 60px;
+}
+
+/* ---- Header ---- */
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.header-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #6C5CE7, #A29BFE);
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.app-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #111;
+  letter-spacing: -0.3px;
+}
+
+.app-subtitle {
+  font-size: 13px;
+  color: #888;
+  margin-top: 2px;
+}
+
+/* ---- Cards ---- */
+.card {
+  background: #fff;
+  border: 1px solid #E5E5E3;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  transition: box-shadow 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+}
+
+/* ---- Patient ID input ---- */
+.patient-id-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.patient-id-input {
+  font-size: 16px;
+  font-family: inherit;
+  padding: 10px 14px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s;
+  background: #FAFAFA;
+}
+
+.patient-id-input:focus {
+  border-color: #6C5CE7;
+  box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.1);
+}
+
+/* ---- Language badge ---- */
+.language-badge-wrapper {
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.language-badge {
+  display: inline-block;
+  font-size: 13px;
+  padding: 5px 14px;
+  border-radius: 20px;
+  background: #F0EDFF;
+  color: #5B4DC7;
+}
+
+/* ---- Record button ---- */
+.record-button-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 20px 0 24px;
+}
+
+.record-button {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2D2D2D;
+  color: #fff;
+  transition: background 0.25s ease, transform 0.15s ease, box-shadow 0.25s ease;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.record-button:hover {
+  transform: scale(1.04);
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.2);
+}
+
+.record-button:active {
+  transform: scale(0.97);
+}
+
+.record-button.recording {
+  background: #E53E3E;
+  animation: pulse 1.5s ease-in-out infinite;
+  box-shadow: 0 0 0 0 rgba(229, 62, 62, 0.4);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(229, 62, 62, 0.4); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 20px rgba(229, 62, 62, 0); }
+}
+
+.record-label {
+  margin-top: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #555;
+}
+
+.record-error {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #E53E3E;
+  text-align: center;
+  max-width: 280px;
+}
+
+/* ---- Status message ---- */
+.status-message {
+  text-align: center;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+  animation: fadeIn 0.3s ease;
+}
+
+.status-success {
+  background: #EAF3DE;
+  color: #3B6D11;
+}
+
+.status-error {
+  background: #FCEBEB;
+  color: #A32D2D;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- Patient card ---- */
+.patient-card--empty {
+  text-align: center;
+  padding: 30px 20px;
+}
+
+.patient-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.patient-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111;
+}
+
+.patient-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 14px;
+  color: #666;
+  margin-top: 3px;
+}
+
+.capitalize {
+  text-transform: capitalize;
+}
+
+/* ---- Urgency badge ---- */
+.urgency-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+/* ---- Field groups ---- */
+.field-group {
+  margin-bottom: 14px;
+}
+
+.field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #888;
+  margin-bottom: 6px;
+}
+
+.field-value {
+  font-size: 15px;
+  color: #333;
+}
+
+.muted-text {
+  color: #aaa;
+  font-style: italic;
+}
+
+.confidence-label {
+  font-size: 12px;
+  color: #999;
+}
+
+/* ---- Pills ---- */
+.pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pill {
+  display: inline-block;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.pill--symptom {
+  background: #EEEDFE;
+  color: #3C3489;
+}
+
+.pill--medication {
+  background: #E1F5EE;
+  color: #085041;
+}
+
+/* ---- Missing fields banner ---- */
+.missing-banner {
+  display: flex;
+  gap: 12px;
+  background: #FFF8E1;
+  border: 1px solid #FFE082;
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  animation: fadeIn 0.3s ease;
+}
+
+.missing-banner-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.missing-banner-content {
+  font-size: 14px;
+  color: #6D4C00;
+}
+
+.missing-list {
+  margin-top: 6px;
+  padding-left: 18px;
+}
+
+.missing-list li {
+  margin-bottom: 3px;
+  font-size: 13px;
+}
+
+/* ---- Transcript panel ---- */
+.transcript-panel {
+  margin-top: 14px;
+  border-top: 1px solid #f0f0f0;
+  padding-top: 10px;
+}
+
+.transcript-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  color: #6C5CE7;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.transcript-toggle:hover {
+  text-decoration: underline;
+}
+
+.chevron {
+  transition: transform 0.2s ease;
+  font-size: 14px;
+}
+
+.chevron.open {
+  transform: rotate(180deg);
+}
+
+.transcript-content {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: #FAFAF9;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #444;
+  line-height: 1.6;
+  animation: fadeIn 0.2s ease;
+}
+
+/* ---- Visit history ---- */
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #333;
+  margin-bottom: 12px;
+}
+
+.visit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.visit-card {
+  padding: 14px 16px;
+}
+
+.visit-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.visit-date {
+  font-size: 13px;
+  color: #666;
+}
+
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 480px) {
+  .app-container {
+    padding: 16px 12px 40px;
+  }
+
+  .app-title {
+    font-size: 19px;
+  }
+
+  .record-button {
+    width: 100px;
+    height: 100px;
+  }
+
+  .mic-icon {
+    width: 32px;
+    height: 32px;
+  }
+}

@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Environment files (contain secrets)
+.env
+backend/.env
+frontend/.env
+
+# Firebase service account (secret)
+backend/serviceAccountKey.json
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Build output
+frontend/dist/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
