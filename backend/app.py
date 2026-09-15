@@ -25,17 +25,31 @@ from firebase_admin import credentials, db as firebase_db
 
 load_dotenv()
 
+import json
+import base64
+
 # ---------------------------------------------------------------------------
 # Firebase initialisation
 # ---------------------------------------------------------------------------
 FIREBASE_CRED_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH", "serviceAccountKey.json")
 FIREBASE_DB_URL = os.getenv("FIREBASE_DATABASE_URL", "")
+FIREBASE_BASE64 = os.getenv("FIREBASE_SERVICE_ACCOUNT_BASE64", "")
 
-if os.path.exists(FIREBASE_CRED_PATH) and FIREBASE_DB_URL:
+if FIREBASE_BASE64 and FIREBASE_DB_URL:
+    try:
+        cred_dict = json.loads(base64.b64decode(FIREBASE_BASE64).decode("utf-8"))
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_DB_URL})
+        FIREBASE_ENABLED = True
+        print("[app] Firebase initialized successfully from base64 env var.")
+    except Exception as exc:
+        FIREBASE_ENABLED = False
+        print(f"[app] WARNING: Failed to initialize Firebase from base64 env var: {exc}")
+elif os.path.exists(FIREBASE_CRED_PATH) and FIREBASE_DB_URL:
     cred = credentials.Certificate(FIREBASE_CRED_PATH)
     firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_DB_URL})
     FIREBASE_ENABLED = True
-    print("[app] Firebase initialized successfully.")
+    print("[app] Firebase initialized successfully from file.")
 else:
     FIREBASE_ENABLED = False
     print("[app] WARNING: Firebase credentials not found. Database writes disabled.")
@@ -46,7 +60,6 @@ else:
 from transcribe import transcribe_audio          # noqa: E402
 from extract import extract_medical_data, detect_speakers  # noqa: E402
 from chatbot import answer_patient_query, generate_realtime_assist  # noqa: E402
-from rag import index_patient_visit, reindex_patient_from_firebase, get_index_stats  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Flask app
@@ -273,16 +286,6 @@ def extract_endpoint():
             visit_ref.set(visit_record)
             print(f"[app] Wrote visit {visit_id} for patient {patient_id}, problem {problem_id}")
 
-            # Index into RAG vector store
-            index_patient_visit(
-                patient_id=patient_id,
-                problem_id=problem_id,
-                visit_id=visit_id,
-                transcript=transcript,
-                extracted=extracted,
-                problem_label=problem_label,
-            )
-
         except Exception as exc:
             print(f"[app] Firebase write failed: {exc}")
 
@@ -427,7 +430,7 @@ def chatbot_endpoint():
         }), 200
 
     # Get AI answer
-    answer = answer_patient_query(patient_data, question, patient_id=patient_id)
+    answer = answer_patient_query(patient_data, question)
 
     return jsonify({"answer": answer}), 200
 
@@ -551,56 +554,9 @@ def migrate_endpoint():
         return jsonify({"error": str(exc)}), 500
 
 
-@app.route("/reindex", methods=["POST"])
-def reindex_endpoint():
-    """
-    POST /reindex
-    Rebuild RAG vector index from all patient data in Firebase.
-    Optional JSON body: { "patient_id": "PT-1234" } to reindex a single patient.
-    """
-    if not FIREBASE_ENABLED:
-        return jsonify({"error": "Firebase not enabled"}), 500
-
-    body = request.get_json(force=True) if request.data else {}
-    target_patient = body.get("patient_id", "")
-
-    try:
-        if target_patient:
-            # Reindex single patient
-            patient_data = _get_patient_data(target_patient)
-            if not patient_data:
-                return jsonify({"error": f"Patient {target_patient} not found"}), 404
-            count = reindex_patient_from_firebase(target_patient, patient_data)
-            return jsonify({
-                "message": f"Reindexed patient {target_patient}",
-                "chunks_indexed": count,
-            }), 200
-        else:
-            # Reindex all patients
-            patients_ref = firebase_db.reference("patients")
-            all_patients = patients_ref.get()
-            if not all_patients:
-                return jsonify({"message": "No patients to reindex"}), 200
-
-            total = 0
-            for pid, pdata in all_patients.items():
-                total += reindex_patient_from_firebase(pid, pdata)
-
-            return jsonify({
-                "message": f"Reindexed all patients",
-                "patients_count": len(all_patients),
-                "chunks_indexed": total,
-            }), 200
-
-    except Exception as exc:
-        print(f"[app] Reindex failed: {exc}")
-        return jsonify({"error": str(exc)}), 500
-
-
 @app.route("/health", methods=["GET"])
 def health():
-    rag_stats = get_index_stats()
-    return jsonify({"status": "ok", "firebase": FIREBASE_ENABLED, "rag": rag_stats})
+    return jsonify({"status": "ok", "firebase": FIREBASE_ENABLED})
 
 
 # ---------------------------------------------------------------------------
