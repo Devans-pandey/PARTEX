@@ -1,6 +1,6 @@
 """
 Groq LLM extraction module.
-Calls llama3-70b-8192 to extract structured medical data from transcripts.
+Calls llama-3.1-70b-versatile to extract structured medical data from transcripts.
 
 Features:
   - Extract structured medical JSON from doctor-patient conversations
@@ -142,7 +142,7 @@ def extract_medical_data(transcript: str, prior_patient_data: dict | None = None
 
     # First attempt
     response = client.chat.completions.create(
-        model="llama3-70b-8192",
+        model="llama-3.1-70b-versatile",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
@@ -169,7 +169,7 @@ def extract_medical_data(transcript: str, prior_patient_data: dict | None = None
     )
 
     response = client.chat.completions.create(
-        model="llama3-70b-8192",
+        model="llama-3.1-70b-versatile",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": retry_prompt},
@@ -210,7 +210,7 @@ def detect_speakers(transcript: str) -> list[dict]:
 
     try:
         response = client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama-3.1-70b-versatile",
             messages=[
                 {"role": "system", "content": SPEAKER_DETECTION_SYSTEM},
                 {"role": "user", "content": prompt},
