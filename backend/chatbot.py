@@ -190,7 +190,7 @@ def answer_patient_query(patient_data: dict, question: str) -> str:
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama3-70b-8192",
             messages=[
                 {"role": "system", "content": CHATBOT_SYSTEM},
                 {"role": "user", "content": prompt},
@@ -266,7 +266,7 @@ def generate_realtime_assist(
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama3-70b-8192",
             messages=[
                 {"role": "system", "content": REALTIME_ASSIST_SYSTEM},
                 {"role": "user", "content": prompt},
