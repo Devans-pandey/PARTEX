@@ -37,14 +37,20 @@ FIREBASE_BASE64 = os.getenv("FIREBASE_SERVICE_ACCOUNT_BASE64", "")
 
 if FIREBASE_BASE64 and FIREBASE_DB_URL:
     try:
-        cred_dict = json.loads(base64.b64decode(FIREBASE_BASE64).decode("utf-8"))
+        # First, try to parse it directly as raw JSON (in case user pasted raw JSON)
+        try:
+            cred_dict = json.loads(FIREBASE_BASE64)
+        except json.JSONDecodeError:
+            # If that fails, try decoding as base64
+            cred_dict = json.loads(base64.b64decode(FIREBASE_BASE64).decode("utf-8"))
+            
         cred = credentials.Certificate(cred_dict)
         firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_DB_URL})
         FIREBASE_ENABLED = True
-        print("[app] Firebase initialized successfully from base64 env var.")
+        print("[app] Firebase initialized successfully from env var.")
     except Exception as exc:
         FIREBASE_ENABLED = False
-        print(f"[app] WARNING: Failed to initialize Firebase from base64 env var: {exc}")
+        print(f"[app] WARNING: Failed to initialize Firebase from env var: {exc}")
 elif os.path.exists(FIREBASE_CRED_PATH) and FIREBASE_DB_URL:
     cred = credentials.Certificate(FIREBASE_CRED_PATH)
     firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_DB_URL})
